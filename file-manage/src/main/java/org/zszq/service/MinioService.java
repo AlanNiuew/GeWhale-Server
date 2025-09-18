@@ -5,6 +5,7 @@ import io.minio.errors.*;
 import io.minio.http.Method;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
+import org.springframework.web.multipart.MultipartFile;
 
 import java.io.File;
 import java.io.IOException;
@@ -120,17 +121,103 @@ public class MinioService {
     public String generatePreviewUrl(String bucketName, String objectName, int expiresHours) {
         try {
             // 生成预签名URL
-            String url = minioClient.getPresignedObjectUrl(GetPresignedObjectUrlArgs.builder()
+            return minioClient.getPresignedObjectUrl(GetPresignedObjectUrlArgs.builder()
                     .bucket(bucketName)
                     .object(objectName)
                     .expiry(expiresHours, TimeUnit.HOURS)
                     .method(Method.GET)
                     .build());
-            return url;
         } catch (MinioException | InvalidKeyException | NoSuchAlgorithmException | IOException e) {
             System.out.println("生成预览链接失败: " + e.getMessage());
             return null;
         }
+    }
+
+    /**
+     * 专门用于音乐文件上传的方法
+     */
+    public String uploadMusicFile(MultipartFile file, String objectName, String bucketName) {
+        try {
+            // 检查文件类型
+            String contentType = file.getContentType();
+            if (!isAudioFile(contentType)) {
+                throw new IllegalArgumentException("不支持的音频文件格式");
+            }
+
+            // 检查存储桶是否存在
+            if (!minioClient.bucketExists(BucketExistsArgs.builder().bucket(bucketName).build())) {
+                minioClient.makeBucket(MakeBucketArgs.builder().bucket(bucketName).build());
+            }
+
+            // 上传文件
+            minioClient.putObject(PutObjectArgs.builder()
+                    .bucket(bucketName)
+                    .object(objectName)
+                    .stream(file.getInputStream(), file.getSize(), -1)
+                    .contentType(contentType)
+                    .build());
+
+            return generateFileUrl(bucketName, objectName);
+
+        } catch (Exception e) {
+            throw new RuntimeException("音乐文件上传失败: " + e.getMessage(), e);
+        }
+    }
+
+    /**
+     * 上传音乐封面图片
+     */
+    public String uploadCoverImage(MultipartFile file, String objectName, String bucketName) {
+        try {
+            // 检查文件类型
+            String contentType = file.getContentType();
+            if (!isImageFile(contentType)) {
+                throw new IllegalArgumentException("不支持的图片文件格式");
+            }
+
+            // 检查存储桶是否存在
+            if (!minioClient.bucketExists(BucketExistsArgs.builder().bucket(bucketName).build())) {
+                minioClient.makeBucket(MakeBucketArgs.builder().bucket(bucketName).build());
+            }
+
+            // 上传文件
+            minioClient.putObject(PutObjectArgs.builder()
+                    .bucket(bucketName)
+                    .object(objectName)
+                    .stream(file.getInputStream(), file.getSize(), -1)
+                    .contentType(contentType)
+                    .build());
+
+            return generateFileUrl(bucketName, objectName);
+
+        } catch (Exception e) {
+            throw new RuntimeException("封面图片上传失败: " + e.getMessage(), e);
+        }
+    }
+
+    /**
+     * 生成文件访问URL
+     */
+    private String generateFileUrl(String bucketName, String objectName) {
+        // 这里可以根据实际需求返回CDN地址或直接访问地址
+        return String.format("http://localhost:9000/%s/%s", bucketName, objectName);
+    }
+
+    /**
+     * 检查是否为音频文件
+     */
+    private boolean isAudioFile(String contentType) {
+        return contentType != null && (
+                contentType.startsWith("audio/") ||
+                contentType.equals("application/ogg")
+        );
+    }
+
+    /**
+     * 检查是否为图片文件
+     */
+    private boolean isImageFile(String contentType) {
+        return contentType != null && contentType.startsWith("image/");
     }
 
     /**
